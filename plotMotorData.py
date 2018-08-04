@@ -308,28 +308,6 @@ class PopupParamSetter(QtGui.QWidget):
 
         self.createWindow() 
 
-    def createParamList(self):
-        self.timeoutTimer.stop()
-        self.codes = []
-        self.descs = []
-        if self.ser.is_open:
-            if self.ser.in_waiting > 0:
-                # Read the entire response
-                read_all_string = self.ser.read(self.ser.in_waiting).decode('utf-8')
-                print(read_all_string)
-                # Parse through, extract codes and descriptions
-                indiv_lines = read_all_string.split('\n')
-                print(indiv_lines)
-                for line in indiv_lines:
-                    if((not line.startswith('MCU')) and (line)):
-                        numpart, rest = line.split(':')
-                        linenum = int(numpart)
-                        code, desc = rest.strip().split(',')
-                        code = code.strip()
-                        desc = desc.strip()
-                        self.codes.append(code)
-                        self.descs.append(desc)
-        self.setSpinner()
     def createWindow(self):
         self.layout = QtGui.QGridLayout()
         self.setWindowTitle("Please wait...")
@@ -361,6 +339,7 @@ class PopupParamSetter(QtGui.QWidget):
         'Param3','Param4','Param5','Param6','Param7','Param8','Param9','Param10']]
         self.OkButton = QtGui.QPushButton('OK')
         self.CancelButton = QtGui.QPushButton('Cancel')
+        self.CancelButton.clicked.connect(self.close)
         self.layout.addWidget(self.OkButton,12,0,1,1)
         self.layout.addWidget(self.CancelButton,12,1,1,1)
         
@@ -371,12 +350,79 @@ class PopupParamSetter(QtGui.QWidget):
         for i in range(10-self.numVars):
             self.Labels[i+self.numVars].hide()
             self.Combos[i+self.numVars].hide()
-            
-        self.ser.write("MCU+USB?\r\n".encode())
         self.timeoutTimer = QtCore.QTimer()
+        if self.ser.is_open:
+            self.ser.write("MCU+USB?\r\n".encode())
         self.timeoutTimer.timeout.connect(self.createParamList)
-        self.timeoutTimer.start(500)
+        self.timeoutTimer.start(100)
         self.show()
+        
+    def createParamList(self):
+        self.timeoutTimer.stop()
+        self.codes = []
+        self.descs = []
+        if self.ser.is_open:
+            if self.ser.in_waiting > 0:
+                # Read the entire response
+                read_all_string = self.ser.read(self.ser.in_waiting).decode('utf-8')
+                print(read_all_string)
+                # Parse through, extract codes and descriptions
+                indiv_lines = read_all_string.split('\n')
+                print(indiv_lines)
+                for line in indiv_lines:
+                    if((not line.startswith('MCU')) and (line)):
+                        numpart, rest = line.split(':')
+                        linenum = int(numpart)
+                        code, desc = rest.strip().split(',')
+                        code = code.strip()
+                        desc = desc.strip()
+                        self.codes.append(code)
+                        self.descs.append(desc)
+        self.setSpinner()
+        # Listen for the number of variables currently set in the controller
+        if self.ser.is_open:
+            self.ser.write("MCU+USBNUMVARS?\r\n".encode())
+        self.timeoutTimer.timeout.connect(self.cb_numVars)
+        self.timeoutTimer.start(100)
+    def cb_numVars(self):
+        self.timeoutTimer.stop()
+        if self.ser.is_open:
+            if self.ser.in_waiting > 0:
+                # Read it all in
+                read_all_string = self.ser.read(self.ser.in_waiting).decode('utf-8')
+                indiv_lines = read_all_string.split('\n')
+                print(indiv_lines)
+                for line in indiv_lines:
+                    if((not line.startswith('MCU')) and (line)):
+                        try:
+                            self.numVars = int(line)
+                        except ValueError:
+                            print("In popupParamSetter: "+line)
+            self.NumVarSpin.setValue(self.numVars)
+            self.SpinBoxChanged()
+            self.ser.write("MCU+USBSPEED?\r\n".encode())
+        self.timeoutTimer.timeout.connect(self.cb_speed)
+        self.timeoutTimer.start(100)
+    def cb_speed(self):
+        self.timeoutTimer.stop()
+        if self.ser.is_open:
+            if self.ser.in_waiting > 0:
+                # Read it all in
+                read_all_string = self.ser.read(self.ser.in_waiting).decode('utf-8')
+                indiv_lines = read_all_string.split('\n')
+                print(indiv_lines)
+                for line in indiv_lines:
+                    if((not line.startswith('MCU')) and (line)):
+                        try:
+                            self.currentDataRate = int(line)
+                            self.DataRateDial.setValue(self.dialDetents[self.currentDataRate])
+                            self.DialChanged()
+                        except ValueError:
+                            print("In popupParamSetter: "+line)
+            self.NumVarSpin.setValue(self.numVars)
+            self.SpinBoxChanged()
+            self.ser.write("MCU+USBSPEED?\r\n".encode())
+
     def setSpinner(self):
         if(len(self.codes) == 0):
             paramList = ['Ia','Ib','Ic','Ta','Tb','Tc','Throttle','RampAngle',\
@@ -405,14 +451,18 @@ class PopupParamSetter(QtGui.QWidget):
         self.popupClosed.emit()
         super().closeEvent(event)
     def submitValues(self):
-        for i in range(5):
-            paramChoice = self.Combos[i].currentIndex()
-            print("Param "+str(i)+": "+str(paramChoice))
-            sendStr = "MCU+USB="+self.paramSendList[paramChoice]+","+str(i+1)+"\n"
-            sendStr = sendStr.encode()
-            if self.ser.is_open:
+        if self.ser.is_open:
+            self.ser.write('MCU+USBNUMVARS='+str(self.numVars))
+            sleep(5)
+            self.ser.write('MCU+USBSPEED='+str(self.currentDataRate))
+            sleep(5)
+            for i in range(self.numVars):
+                paramChoice = self.Combos[i].currentIndex()
+                print("Param "+str(i)+": "+str(paramChoice))
+                sendStr = "MCU+USB="+self.paramSendList[paramChoice]+","+str(i+1)+"\n"
+                sendStr = sendStr.encode()
                 self.ser.write(sendStr)
-        
+        self.close()
     def SpinBoxChanged(self):
         # Remove all dropdowns
         for i in range(10):
