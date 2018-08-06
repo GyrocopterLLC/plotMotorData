@@ -100,33 +100,45 @@ class PlotWindow(QtGui.QWidget):
     @pyqtSlot(int)
     def popupClosed(self, number_of_vars):
         print("Popup was closed")
+        # Clear old data labels
+        for i in range(len(self.dataLabels)):
+            self.plotLegend.removeItem(self.dataLabels[i])
+        # Change number of plots if needed
         if(number_of_vars != self.numPlots):
             self.numPlots = number_of_vars
             self.listener.setNumPlots(self.numPlots)
+        # Set new data labels
+        self.dataLabels=[]
+        for i in range(self.numPlots):
+            self.dataLabels.append(self.popwin.paramList[self.popwin.selectedParams[i]])
+            self.plotLegend.addItem(self.plotData[i],self.dataLabels[i])
+            self.plotData[i].setData(self.listener.data[i,:],name=self.dataLabels[i])
         self.timer.start()
     
-    def __init__(self, numPlots=10):
+    def __init__(self, maxNumPlots=10):
         super().__init__()
         self.setWindowTitle("Graph Stuff!")
         print(sys.version)
-        self.numPlots = numPlots
+        self.maxNumPlots = maxNumPlots
+        self.numPlots = maxNumPlots
+        self.dataLabels = []
         self.createWindow()
         
         ## Fancy plotting things
-        self.plotData = [pg.PlotDataItem() for _ in range(self.numPlots)]
-        self.zoomPlotData = [pg.PlotDataItem() for _ in range(self.numPlots)]
+        self.plotData = [pg.PlotDataItem() for _ in range(self.maxNumPlots)]
+        self.zoomPlotData = [pg.PlotDataItem() for _ in range(self.maxNumPlots)]
         self.lr = pg.LinearRegionItem()
         self.plot.addItem(self.lr)
         self.lr.setBounds([0,size_arrays])
         self.lr.setRegion([int(size_arrays*.35),int(size_arrays*.65)])
         self.lr.sigRegionChanged.connect(self.updateZoomPlot)
         self.zoomPlot.sigXRangeChanged.connect(self.updateZoomRegion)
-        for i in range(self.numPlots):
+        for i in range(self.maxNumPlots):
             self.plot.addItem(self.plotData[i])
             self.zoomPlot.addItem(self.zoomPlotData[i])
             self.plotData[i].setPen(pg.intColor(i))
             self.zoomPlotData[i].setPen(pg.intColor(i))
-            
+        self.plotLegend = self.plot.addLegend()
         ## List the Com ports
         self.listPorts()
         
@@ -208,7 +220,6 @@ class PlotWindow(QtGui.QWidget):
 
         ## Display the widget as a new window
         self.show()
-
         
     def updateZoomPlot(self):
         self.zoomPlot.setXRange(*self.lr.getRegion(),padding=0)
@@ -263,28 +274,24 @@ class PlotWindow(QtGui.QWidget):
             self.timer.stop()
             # Start the timer for updating plots
             self.plotTimer.start(50)
-            tempstr = "MCU+SERIALDATA=1\n"
-            tempstr = tempstr.encode()
-            self.ser.write(tempstr)
+            self.ser.write("MCU+SERIALDATA=1\r\n".encode())
     def StopClicked(self):
         #print(self.start_text.text())
         self.listener.exit_now()
         self.plotTimer.stop()
         self.timer.start()
         if(self.ser.is_open):
-            tempstr = "MCU+SERIALDATA=0\n"
-            tempstr = tempstr.encode()
-            self.ser.write(tempstr)
+            self.ser.write("MCU+SERIALDATA=0\r\n".encode())
     def cmd1Clicked(self):
         #print(self.stop_text.text())
         if(self.ser.is_open):
-            tempstr = self.cmd1_text.text() + "\n"
+            tempstr = self.cmd1_text.text() + "\r\n"
             tempstr = tempstr.encode()
             self.ser.write(tempstr)
     def cmd2Clicked(self):
         #print(self.stop_text.text())
         if(self.ser.is_open):
-            tempstr = self.cmd2_text.text() + "\n"
+            tempstr = self.cmd2_text.text() + "\r\n"
             tempstr = tempstr.encode()
             self.ser.write(tempstr)
         
@@ -307,9 +314,9 @@ class PopupParamSetter(QtGui.QWidget):
         super().__init__()
         self.ser = serial_port
         self.numVars = 5
-        self.selectedParams = [0,1,2,6,10]
+        self.selectedParams = [0, 1, 2, 6, 10, 0, 0, 0, 0, 0]
 
-        self.createWindow() 
+        self.createWindow()
 
     def createWindow(self):
         self.layout = QtGui.QGridLayout()
@@ -437,18 +444,18 @@ class PopupParamSetter(QtGui.QWidget):
 
     def setSpinner(self):
         if(len(self.codes) == 0):
-            paramList = ['Ia','Ib','Ic','Ta','Tb','Tc','Throttle','RampAngle',\
+            self.paramList = ['Ia','Ib','Ic','Ta','Tb','Tc','Throttle','RampAngle',\
             'HallAngle','HallSpeed','Vbus','Id','Iq','Td','Tq','ErrorCode',\
             'Vrefint']
             self.paramSendList = ['IA','IB','IC','TA','TB','TC','TH','RA','HA',\
             'HS','VS','ID','IQ','TD','TQ','ER','VR']
         else:
-            paramList = self.descs
+            self.paramList = self.descs
             self.paramSendList = self.codes
         
         for i in range(10):
-            for j in range(len(paramList)):
-                self.Combos[i].insertItem(j,paramList[j])
+            for j in range(len(self.paramList)):
+                self.Combos[i].insertItem(j,self.paramList[j])
         
         self.OkButton.clicked.connect(self.submitValues)
         self.setWindowTitle("Set Params!")
@@ -476,9 +483,9 @@ class PopupParamSetter(QtGui.QWidget):
         self.timeoutTimer.stop()
         self.timeoutTimer.timeout.disconnect(self.submitStep3)
         for i in range(self.numVars):
-            paramChoice = self.Combos[i].currentIndex()
-            print("Param "+str(i)+": "+str(paramChoice))
-            sendStr = "MCU+USB="+self.paramSendList[paramChoice]+","+str(i+1)+"\r\n"
+            self.selectedParams[i] = self.Combos[i].currentIndex()
+            print("Param "+str(i)+": "+str(self.selectedParams[i]))
+            sendStr = "MCU+USB="+self.paramSendList[self.selectedParams[i]]+","+str(i+1)+"\r\n"
             sendStr = sendStr.encode()
             self.ser.write(sendStr)
         self.close()
@@ -505,6 +512,9 @@ class PopupParamSetter(QtGui.QWidget):
             self.DataRateLabel.setText('Data Rate: '+str(self.dataRates[self.currentDataRate])+ 'Hz')
     def DialDetent(self):
         self.DataRateDial.setValue(self.dialDetents[self.currentDataRate])
+
+
+
 def main():
     ## Always start by initializing Qt (only once per application)
     app = QtGui.QApplication(sys.argv)
